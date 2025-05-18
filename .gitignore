@@ -7,6 +7,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+*.pyc
 
 # IDE
 .vscode/
@@ -15,3 +16,7 @@ __pycache__/
 # Vector store
 *.faiss
 *.pkl
+
+# Git cleanup
+cleanup.bat
+.git/
