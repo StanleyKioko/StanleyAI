@@ -38,8 +38,9 @@ if check_dependencies():
 
 def validate_api_key():
     api_key = os.getenv('GROQ_API_KEY')
-    if not api_key or api_key == "your_valid_groq_api_key_here":
-        print("Error: Invalid or missing GROQ API key in .env file")
+    if not api_key:
+        print("Error: GROQ_API_KEY not found in .env file")
+        print("Please copy .env.template to .env and add your API key")
         return False
     return True
 
