@@ -4,20 +4,17 @@ from flask import Flask, render_template, request, jsonify
 from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings  # Updated import
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains import ConversationalRetrievalChain
 from langchain_groq import ChatGroq
-from langchain.memory import ConversationBufferMemory  # Fixed import
+from langchain.memory import ConversationBufferMemory
 from dotenv import load_dotenv
 
-# Add import error handling
-try:
-    app = Flask(__name__)
-except ImportError as e:
-    print("Error: Required packages not installed. Please run:")
-    print("pip install flask langchain-core langchain-community langchain-groq python-dotenv")
-    raise e
+# Load environment variables
+load_dotenv()
+
+app = Flask(__name__)
 
 # Custom loader for SQLite database
 class SQLiteDocumentLoader(BaseLoader):
@@ -50,10 +47,7 @@ def init_chatbot():
     chunks = text_splitter.split_documents(documents)
 
     # Create embeddings and vector store
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        encode_kwargs={"normalize_embeddings": True}
-    )
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     vector_store = FAISS.from_documents(chunks, embeddings)
 
     # Set up conversational model and memory
@@ -68,16 +62,9 @@ def init_chatbot():
     )
     return qa_chain
 
-def validate_api_key():
-    api_key = os.getenv('GROQ_API_KEY')
-    if not api_key:
-        raise ValueError("GROQ_API_KEY environment variable not set. Please check your .env file.")
-    return api_key
-
-# Load environment variables
-load_dotenv(override=True)
-GROQ_API_KEY = validate_api_key()
-os.environ["GROQ_API_KEY"] = GROQ_API_KEY
+# Set Groq API key
+if not os.environ.get("GROQ_API_KEY"):
+    raise ValueError("GROQ_API_KEY environment variable not set.")
 
 # Initialize the chain
 try:
@@ -103,4 +90,5 @@ def chat():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=False, host="0.0.0.0", port=port)
