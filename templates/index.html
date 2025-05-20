@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>StanleyAI Chatbot</title>
+    <style>
+        body { max-width: 800px; margin: 0 auto; padding: 20px; }
+        #chat-container { height: 400px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
+        #input-container { margin-top: 20px; }
+        input[type="text"] { width: 80%; padding: 5px; }
+    </style>
+</head>
+<body>
+    <h1>StanleyAI Chatbot</h1>
+    <div id="chat-container"></div>
+    <div id="input-container">
+        <input type="text" id="user-input" placeholder="Type your message...">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+    <script>
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const message = input.value;
+            if (!message) return;
+            
+            displayMessage('You: ' + message);
+            input.value = '';
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: message})
+                });
+                const data = await response.json();
+                displayMessage('Bot: ' + data.response);
+            } catch (error) {
+                displayMessage('Error: ' + error);
+            }
+        }
+
+        function displayMessage(message) {
+            const container = document.getElementById('chat-container');
+            container.innerHTML += '<p>' + message + '</p>';
+            container.scrollTop = container.scrollHeight;
+        }
+    </script>
+</body>
+</html>
