@@ -15,6 +15,7 @@ from langchain_groq import ChatGroq
 from langchain.memory import ConversationBufferMemory
 from dotenv import load_dotenv
 from templates.create_documents_db import create_database
+import shutil  # Add this import at the top
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -83,30 +84,74 @@ def ensure_database():
         create_database(files_dir=str(files_dir), db_path=str(db_path))
     return db_path
 
+def cleanup_vector_store():
+    """Safely remove vector store directory"""
+    vector_store_path = Path(__file__).parent / "vector_store"
+    if vector_store_path.exists():
+        try:
+            shutil.rmtree(vector_store_path)
+            print(f"Removed existing vector store at {vector_store_path}")
+            return True
+        except Exception as e:
+            print(f"Error removing vector store: {e}")
+            return False
+    return True
+
 # Initialize chatbot components
-def init_chatbot():
+def init_chatbot(force_refresh=False):
+    """Initialize chatbot with option to force vector store refresh"""
     # Initialize database
     db_path = ensure_database()
+    vector_store_path = Path(__file__).parent / "vector_store"
     
-    # Load documents
-    loader = SQLiteDocumentLoader(str(db_path))
-    try:
-        documents = loader.load()
-        if not documents:
-            print("No documents found. Please add files to the 'files' directory.")
-            return None
-    except sqlite3.OperationalError as e:
-        print(f"Database error: {e}")
-        print("Try running: python templates/create_documents_db.py")
-        return None
-        
-    # Split documents into chunks
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = text_splitter.split_documents(documents)
+    # Force refresh or missing vector store triggers reindexing
+    if force_refresh or not vector_store_path.exists():
+        # Load documents
+        loader = SQLiteDocumentLoader(str(db_path))
+        try:
+            documents = loader.load()
+            if not documents:
+                print("No documents found. Please add files to the 'files' directory.")
+                return None
+                
+            print(f"Loaded {len(documents)} documents for indexing")
+            
+            # Split documents into chunks with better context preservation
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=500,  # Smaller chunks for better context
+                chunk_overlap=100,
+                separators=["\n\n", "\n", " | ", ".", "!", "?", ",", " ", ""],
+                length_function=len,
+                keep_separator=True
+            )
+            chunks = text_splitter.split_documents(documents)
+            print(f"Created {len(chunks)} chunks for embedding")
 
-    # Create embeddings and vector store
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    vector_store = FAISS.from_documents(chunks, embeddings)
+            # Create embeddings and vector store
+            embeddings = HuggingFaceEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2",
+                model_kwargs={'device': 'cpu'}
+            )
+            vector_store = FAISS.from_documents(chunks, embeddings)
+            vector_store.save_local(str(vector_store_path))
+            print("Vector store created and saved successfully")
+        except Exception as e:
+            print(f"Error creating vector store: {e}")
+            return None
+    else:
+        try:
+            embeddings = HuggingFaceEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2",
+                model_kwargs={'device': 'cpu'}
+            )
+            vector_store = FAISS.load_local(
+                str(vector_store_path),
+                embeddings,
+                allow_dangerous_deserialization=True
+            )
+        except Exception as e:
+            print(f"Error loading vector store: {e}")
+            return None
 
     # Set up conversational model and memory
     llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.3)
@@ -116,7 +161,8 @@ def init_chatbot():
     qa_chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
-        memory=memory
+        memory=memory,
+        verbose=True  # Added for debugging
     )
     return qa_chain
 
@@ -170,6 +216,21 @@ def chat():
         return jsonify({"response": response["answer"]})
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+# Add route to force refresh
+@app.route("/refresh", methods=["POST"])
+def refresh():
+    """Force refresh of the vector store"""
+    global qa_chain
+    try:
+        if not cleanup_vector_store():
+            return jsonify({"error": "Failed to cleanup vector store"}), 500
+        qa_chain = init_chatbot(force_refresh=True)
+        if not qa_chain:
+            return jsonify({"error": "Failed to initialize chatbot"}), 500
+        return jsonify({"message": "Vector store refreshed successfully"})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
